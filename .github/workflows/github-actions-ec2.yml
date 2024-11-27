@@ -1,0 +1,79 @@
+name: Push-to-EC2
+
+# Trigger deployment only on push to main branch
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2 instances and update load balancer
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the files
+        uses: actions/checkout@v2
+
+      # Deploy to Instance 1
+      - name: Deploy to EC2 Instance 1
+        uses: easingthemes/ssh-deploy@main
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.INSTANCE1_DNS }}
+          REMOTE_USER: ${{ secrets.USERNAME }}
+          TARGET: ${{ secrets.TARGET_DIR }}
+
+      - name: Executing remote SSH commands on Instance 1
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.INSTANCE1_DNS }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            sudo apt-get -y update
+            sudo apt-get install -y apache2
+            sudo systemctl start apache2
+            sudo systemctl enable apache2
+            cd home
+            sudo mv * /var/www/html
+
+      # Deploy to Instance 2
+      - name: Deploy to EC2 Instance 2
+        uses: easingthemes/ssh-deploy@main
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.INSTANCE2_DNS }}
+          REMOTE_USER: ${{ secrets.USERNAME }}
+          TARGET: ${{ secrets.TARGET_DIR }}
+
+      - name: Executing remote SSH commands on Instance 2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.INSTANCE2_DNS }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            sudo apt-get -y update
+            sudo apt-get install -y apache2
+            sudo systemctl start apache2
+            sudo systemctl enable apache2
+            cd home
+            sudo mv * /var/www/html
+
+      # Update the load balancer (if necessary)
+      - name: Update Load Balancer Targets
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const AWS = require('aws-sdk');
+            const elb = new AWS.ELBv2({ region: 'N.Viriginia' });
+            const params = {
+              TargetGroupArn: process.env.LOAD_BALANCER_TARGET_GROUP_ARN,
+              Targets: [
+                { Id: process.env.INSTANCE1_ID },
+                { Id: process.env.INSTANCE2_ID }
+              ]
+            };
+            await elb.registerTargets(params).promise();
+            console.log('Instances registered to load balancer successfully.');
